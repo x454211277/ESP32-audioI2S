@@ -543,6 +543,50 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
     xSemaphoreGiveRecursive(mutex_audio);
     return res;
 }
+
+String Audio::connecttopayload(const char* host) {
+    bool isRequest = _client->available();
+    while (isRequest) {
+        Serial.println("WAIT...!");
+        vTaskDelay(2);
+    }
+    HTTPClient httpClient;
+    if(startsWith(host, "https")) m_f_ssl = true;
+    else                          m_f_ssl = false;
+    if (m_f_ssl)
+    {
+        clientsecure.setInsecure();
+        clientsecure.setTimeout(5000);
+    }
+
+    if (m_f_ssl ? httpClient.begin(clientsecure, host) : httpClient.begin(client, host))
+    {
+        int httpCode = httpClient.GET();
+        Serial.println("GET...!");
+
+        // Check the HTTP response code
+        if (httpCode == 200)
+        {
+
+            // Read and write the response to the file
+            String payload = httpClient.getString();
+            Serial.println("Get Payload Success!");
+            httpClient.end();
+            return payload;
+        }
+        else
+        {
+            Serial.println("HTTP request failed");
+        }
+        httpClient.end();
+    }
+    else
+    {
+        Serial.println("HTTP client initialization failed");
+    }
+
+    return "";
+}
 //---------------------------------------------------------------------------------------------------------------------
 bool Audio::httpPrint(const char* host) {
     // user and pwd for authentification only, can be empty
