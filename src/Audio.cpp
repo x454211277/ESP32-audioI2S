@@ -545,12 +545,12 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
 }
 
 String Audio::connecttopayload(const char* host) {
-    unsigned long startTime = millis();
-    while (_client->available() || (millis() - startTime < 5000))
-    {
-        Serial.println("WAIT...!");
-        vTaskDelay(500);
-    }
+    // unsigned long startTime = millis();
+    // while (_client->available() || (millis() - startTime < 5000))
+    // {
+    //     Serial.println("WAIT...!");
+    //     vTaskDelay(500);
+    // }
     HTTPClient httpClient;
     if(startsWith(host, "https")) m_f_ssl = true;
     else                          m_f_ssl = false;
