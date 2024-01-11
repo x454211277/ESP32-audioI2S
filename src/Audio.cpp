@@ -594,7 +594,6 @@ void Audio::stopClient(const char* host)
     {
         HTTPClient httpClient;
         httpClient.begin(clientsecure, host);
-        int httpCode = httpClient.GET();
         httpClient.end();
     }
 }
