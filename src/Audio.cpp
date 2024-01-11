@@ -588,6 +588,16 @@ String Audio::connecttopayload(const char* host) {
 
     return "";
 }
+void Audio::stopClient(const char* host)
+{
+    if(startsWith(host, "https"))
+    {
+        HTTPClient httpClient;
+        httpClient.begin(clientsecure, host);
+        int httpCode = httpClient.GET();
+        httpClient.end();
+    }
+}
 //---------------------------------------------------------------------------------------------------------------------
 bool Audio::httpPrint(const char* host) {
     // user and pwd for authentification only, can be empty

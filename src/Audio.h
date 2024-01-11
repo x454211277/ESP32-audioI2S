@@ -126,6 +126,7 @@ public:
     void setBufsize(int rambuf_sz, int psrambuf_sz);
     bool connecttohost(const char* host, const char* user = "", const char* pwd = "");
     String connecttopayload(const char* host);
+    void stopClient(const char* host);
     bool connecttospeech(const char* speech, const char* lang);
     bool connecttoFS(fs::FS &fs, const char* path, int32_t resumeFilePos = -1);
     bool connecttoSD(const char* path, int32_t resumeFilePos = -1);
