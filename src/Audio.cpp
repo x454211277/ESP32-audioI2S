@@ -2760,6 +2760,10 @@ void Audio::processLocalFile() {
             if(InBuff.bufferFilled() > maxFrameSize){ // read the file header first
                 InBuff.bytesWasRead(readAudioHeader(InBuff.bufferFilled()));
             }
+            else
+            {
+                stopSong();
+            }
             return;
         }
         else{
@@ -2927,7 +2931,7 @@ void Audio::processWebStream() {
 }
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::processWebFile() {
-
+    
     const uint32_t  maxFrameSize = InBuff.getMaxBlockSize();    // every mp3/aac frame is not bigger
     static bool     f_stream;                                   // first audio data received
     static bool     f_webFileDataComplete;                      // all file data received
@@ -2991,6 +2995,10 @@ void Audio::processWebFile() {
         if(InBuff.bufferFilled() > maxFrameSize){ // read the file header first
             int32_t bytesRead = readAudioHeader(maxFrameSize);
             if(bytesRead > 0) InBuff.bytesWasRead(bytesRead);
+        }
+        else
+        {
+            stopSong();
         }
         return;
     }
