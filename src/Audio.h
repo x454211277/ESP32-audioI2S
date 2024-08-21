@@ -25,6 +25,7 @@
 #include <SPIFFS.h>
 #include <FS.h>
 #include <FFat.h>
+#include "AudioTools.h"
 
 using namespace std;
 
@@ -126,6 +127,7 @@ public:
     void setBufsize(int rambuf_sz, int psrambuf_sz);
     bool connecttohost(const char* host, const char* user = "", const char* pwd = "");
     String connecttopayload(const char* host);
+    bool connecttodata(uint8_t * data, size_t data_size, const char * data_type);
     void stopClient(const char* host);
     bool connecttospeech(const char* speech, const char* lang);
     bool connecttoFS(fs::FS &fs, const char* path, int32_t resumeFilePos = -1);
@@ -188,6 +190,7 @@ private:
     void processWebFile();
     void processWebStreamTS();
     void processWebStreamHLS();
+    void processBufferData();
     void playAudioData();
     bool readPlayListData();
     const char* parsePlaylist_M3U();
@@ -408,7 +411,7 @@ private:
     enum : int { APLL_AUTO = -1, APLL_ENABLE = 1, APLL_DISABLE = 0 };
     enum : int { EXTERNAL_I2S = 0, INTERNAL_DAC = 1, INTERNAL_PDM = 2 };
     enum : int { FORMAT_NONE = 0, FORMAT_M3U = 1, FORMAT_PLS = 2, FORMAT_ASX = 3, FORMAT_M3U8 = 4};
-    enum : int { AUDIO_NONE, HTTP_RESPONSE_HEADER, AUDIO_DATA, AUDIO_LOCALFILE,
+    enum : int { AUDIO_NONE, HTTP_RESPONSE_HEADER, AUDIO_DATA, AUDIO_BUFFER_DATA, AUDIO_LOCALFILE,
                  AUDIO_PLAYLISTINIT, AUDIO_PLAYLISTHEADER,  AUDIO_PLAYLISTDATA};
     enum : int { FLAC_BEGIN = 0, FLAC_MAGIC = 1, FLAC_MBH =2, FLAC_SINFO = 3, FLAC_PADDING = 4, FLAC_APP = 5,
                  FLAC_SEEK = 6, FLAC_VORBIS = 7, FLAC_CUESHEET = 8, FLAC_PICTURE = 9, FLAC_OKAY = 100};
@@ -433,6 +436,7 @@ private:
         int pids[4];
     } pid_array;
 
+    MemoryStream          audiomemory; 
     File                  audiofile;    // @suppress("Abstract class cannot be instantiated")
     WiFiClient            client;       // @suppress("Abstract class cannot be instantiated")
     WiFiClientSecure      clientsecure; // @suppress("Abstract class cannot be instantiated")
@@ -529,6 +533,7 @@ private:
     bool            m_f_continue = false;           // next m3u8 chunk is available
     bool            m_f_ts = true;                  // transport stream
     bool            m_f_m4aID3dataAreRead = false;  // has the m4a-ID3data already been read?
+    bool            m_f_audiodataplay = false;
     uint8_t         m_f_channelEnabled = 3;         // internal DAC, both channels
     uint32_t        m_audioFileDuration = 0;
     float           m_audioCurrentTime = 0;
@@ -538,6 +543,7 @@ private:
     float           m_corr = 1.0;					// correction factor for level adjustment
     size_t          m_i2s_bytesWritten = 0;         // set in i2s_write() but not used
     size_t          m_file_size = 0;                // size of the file
+    size_t          m_memory_size = 0;                // size of the file
     uint16_t        m_filterFrequency[2];
     int8_t          m_gain0 = 0;                    // cut or boost filters (EQ)
     int8_t          m_gain1 = 0;
