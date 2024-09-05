@@ -353,6 +353,7 @@ void Audio::setDefaults() {
     m_f_ts = false;
     m_f_m4aID3dataAreRead = false;
     m_f_audiodataplay = false;
+    m_f_user_stream = false;
 
     m_streamType = ST_NONE;
     m_codec = CODEC_NONE;
@@ -385,9 +386,8 @@ void Audio::setConnectionTimeout(uint16_t timeout_ms, uint16_t timeout_ms_ssl){
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
+bool Audio::connecttohost(const char* host, const char* user, const char* pwd, const bool user_stream) {
     // user and pwd for authentification only, can be empty
-
     xSemaphoreTakeRecursive(mutex_audio, portMAX_DELAY);
 
     if(host == NULL) {
@@ -529,6 +529,7 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
         if(endsWith(extension, ".m3u8")){m_expectedPlsFmt = FORMAT_M3U8; if(audio_lasthost) audio_lasthost(host);}
         setDatamode(HTTP_RESPONSE_HEADER);   // Handle header
         m_streamType = ST_WEBSTREAM;
+        m_f_user_stream = user_stream;
     }
     else{
         AUDIO_INFO("Request %s failed!", l_host);
@@ -564,12 +565,16 @@ String Audio::connecttopayload(const char* host) {
         // Check the HTTP response code
         if (httpCode == 200)
         {
-
+            int expectedMinLength = httpClient.getSize();
             // Read and write the response to the file
             String payload = httpClient.getString();
-            Serial.println("Get Payload Success!");
-            httpClient.end();
-            return payload;
+            if (payload.length() >= expectedMinLength)
+            {
+                Serial.println("Get Payload Success!");
+                httpClient.end();
+                return payload;
+            }
+            Serial.println("Incomplete data received");
         }
         else
         {
@@ -2287,6 +2292,7 @@ void Audio::loop() {
                 if(m_playlistFormat == FORMAT_ASX)  connecttohost(parsePlaylist_ASX());
                 break;
             case AUDIO_DATA:
+                if(m_streamType == ST_WEBFILESTREAM) processWebFileStream();
                 if(m_streamType == ST_WEBSTREAM) processWebStream();
                 if(m_streamType == ST_WEBFILE)   processWebFile();
                 break;
@@ -2965,7 +2971,7 @@ void Audio::processWebStream() {
 }
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::processWebFile() {
-    
+
     const uint32_t  maxFrameSize = InBuff.getMaxBlockSize();    // every mp3/aac frame is not bigger
     static bool     f_stream;                                   // first audio data received
     static bool     f_webFileDataComplete;                      // all file data received
@@ -3007,7 +3013,7 @@ void Audio::processWebFile() {
 
     int16_t bytesAddedToBuffer = _client->read(InBuff.getWritePtr(), availableBytes);
 
-     if(bytesAddedToBuffer > 0) {
+    if(bytesAddedToBuffer > 0) {
         byteCounter  += bytesAddedToBuffer;  // Pull request #42
         if(m_f_chunked)             m_chunkcount   -= bytesAddedToBuffer;
         if(m_controlCounter == 100) audioDataCount += bytesAddedToBuffer;
@@ -3021,8 +3027,6 @@ void Audio::processWebFile() {
         AUDIO_INFO("stream ready, buffer filled in %d ms", filltime);
         return;
     }
-
-
 
     // we have a webfile, read the file header first - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     if(m_controlCounter != 100){
@@ -3055,6 +3059,136 @@ void Audio::processWebFile() {
             }
         }
 
+        m_f_running = false;
+        m_streamType = ST_NONE;
+        if(m_codec == CODEC_MP3)    MP3Decoder_FreeBuffers();
+        if(m_codec == CODEC_AAC)    AACDecoder_FreeBuffers();
+        if(m_codec == CODEC_M4A)    AACDecoder_FreeBuffers();
+        if(m_codec == CODEC_FLAC)   FLACDecoder_FreeBuffers();
+        if(m_codec == CODEC_OPUS)   OPUSDecoder_FreeBuffers();
+        if(m_codec == CODEC_VORBIS) VORBISDecoder_FreeBuffers();
+
+        if(m_f_tts){
+            AUDIO_INFO("End of speech: \"%s\"", m_lastHost);
+            if(audio_eof_speech) audio_eof_speech(m_lastHost);
+        }
+        else{
+            AUDIO_INFO("End of webstream: \"%s\"", m_lastHost);
+            if(audio_eof_stream) audio_eof_stream(m_lastHost);
+        }
+        return;
+    }
+
+    if(byteCounter == m_contentlength)                    {f_webFileDataComplete = true;}
+    if(byteCounter - m_audioDataStart == m_audioDataSize) {f_webFileDataComplete = true;}
+
+    // play audio data - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    if(f_stream){
+        static uint8_t cnt = 0;
+        uint8_t compression;
+        if(m_codec == CODEC_WAV)  compression = 1;
+        if(m_codec == CODEC_FLAC) compression = 2;
+        else compression = 3;
+        cnt++;
+        if(cnt == compression){playAudioData(); cnt = 0;}
+    }
+    return;
+}
+//---------------------------------------------------------------------------------------------------------------------
+void Audio::processWebFileStream() {
+    const uint32_t  maxFrameSize = InBuff.getMaxBlockSize();    // every mp3/aac frame is not bigger
+    static bool     f_stream;                                   // first audio data received
+    static bool     f_webFileDataComplete;                      // all file data received
+    static uint32_t byteCounter;                                // count received data
+    static uint32_t chunkSize;                                  // chunkcount read from stream
+    static size_t   audioDataCount;                             // counts the decoded audiodata only
+
+    // first call, set some values to default  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    if(m_f_firstCall) { // runs only ont time per connection, prepare for start
+        m_f_firstCall = false;
+        m_t0 = millis();
+        f_webFileDataComplete = false;
+        f_stream = false;
+        byteCounter = 0;
+        chunkSize = 0;
+        audioDataCount = 0;
+    }
+
+    if(!m_contentlength && !m_f_tts) {log_e("webfile without contentlength!"); stopSong(); return;} // guard
+
+    uint32_t availableBytes = _client->available();      // available from stream
+
+    // chunked data tramsfer - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    if(m_f_chunked && availableBytes){
+        uint8_t readedBytes = 0;
+        if(!chunkSize) chunkSize = chunkedDataTransfer(&readedBytes);
+        availableBytes = min(availableBytes, chunkSize);
+        if(m_f_tts) m_contentlength = chunkSize;
+    }
+
+    // if the buffer is often almost empty issue a warning - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    if(!f_webFileDataComplete && f_stream){
+        if(streamDetection(availableBytes)) return;
+    }
+
+    availableBytes = min((uint32_t)InBuff.writeSpace(), availableBytes);
+    availableBytes = min(m_contentlength - byteCounter, availableBytes);
+    if(m_audioDataSize) availableBytes = min(m_audioDataSize - (byteCounter - m_audioDataStart), availableBytes);
+
+    int16_t bytesAddedToBuffer = _client->read(InBuff.getWritePtr(), availableBytes);
+
+    if(bytesAddedToBuffer > 0) {
+        Serial.print("stream get data time:");
+        Serial.println(millis());
+        byteCounter  += bytesAddedToBuffer;  // Pull request #42
+        if(m_f_chunked)             m_chunkcount   -= bytesAddedToBuffer;
+        if(m_controlCounter == 100) audioDataCount += bytesAddedToBuffer;
+        InBuff.bytesWritten(bytesAddedToBuffer);
+    }
+
+    if(!f_stream){
+        if((InBuff.freeSpace() > maxFrameSize) && (byteCounter < maxFrameSize)) return;
+        Serial.print("stream play begin time:");
+        Serial.println(millis());
+        f_stream = true;  // ready to play the audio data
+        uint16_t filltime = millis() - m_t0;
+        AUDIO_INFO("stream ready, buffer filled in %d ms", filltime);
+        return;
+    }
+
+    // we have a webfile, read the file header first - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    if(m_controlCounter != 100){
+        if(InBuff.bufferFilled() > maxFrameSize){ // read the file header first
+            int32_t bytesRead = readAudioHeader(maxFrameSize);
+            if(bytesRead > 0) InBuff.bytesWasRead(bytesRead);
+        }
+        else
+        {
+            stopSong();
+        }
+        return;
+    }
+
+    if(m_codec == CODEC_OGG){ // log_i("determine correct codec here");
+       uint8_t codec = determineOggCodec(InBuff.getReadPtr(), maxFrameSize);
+       if(codec == CODEC_FLAC)   {m_codec = CODEC_FLAC;   initializeDecoder(); return;}
+       if(codec == CODEC_OPUS)   {m_codec = CODEC_OPUS;   initializeDecoder(); return;}
+       if(codec == CODEC_VORBIS) {m_codec = CODEC_VORBIS; initializeDecoder(); return;}
+       stopSong();
+       return;
+    }
+
+    // end of webfile reached? - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    if(f_webFileDataComplete && InBuff.bufferFilled() < InBuff.getMaxBlockSize()){
+        if(InBuff.bufferFilled()){
+            if(!readID3V1Tag()){
+                int bytesDecoded = sendBytes(InBuff.getReadPtr(), InBuff.bufferFilled());
+                if(bytesDecoded > 2){InBuff.bytesWasRead(bytesDecoded); return;}
+            }
+        }
+
+        Serial.print("stream play finish time:");
+        Serial.println(millis());
         m_f_running = false;
         m_streamType = ST_NONE;
         if(m_codec == CODEC_MP3)    MP3Decoder_FreeBuffers();
@@ -3604,7 +3738,8 @@ bool Audio::parseHttpResponseHeader() { // this is the response to a GET / reque
             const char* c_cl = (rhl + 15);
             int32_t i_cl = atoi(c_cl);
             m_contentlength = i_cl;
-            m_streamType = ST_WEBFILE; // Stream comes from a fileserver
+            if (m_f_user_stream) m_streamType = ST_WEBFILESTREAM;
+            else m_streamType = ST_WEBFILE; // Stream comes from a fileserver
             if(m_f_Log) AUDIO_INFO("content-length: %i", m_contentlength);
         }
 

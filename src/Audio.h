@@ -125,7 +125,7 @@ public:
     Audio(bool internalDAC = false, uint8_t channelEnabled = 3, uint8_t i2sPort = I2S_NUM_0); // #99
     ~Audio();
     void setBufsize(int rambuf_sz, int psrambuf_sz);
-    bool connecttohost(const char* host, const char* user = "", const char* pwd = "");
+    bool connecttohost(const char* host, const char* user = "", const char* pwd = "", const bool user_stream = false);
     String connecttopayload(const char* host);
     bool connecttodata(uint8_t * data, size_t data_size, const char * data_type);
     void stopClient(const char* host);
@@ -188,6 +188,7 @@ private:
     void processLocalFile();
     void processWebStream();
     void processWebFile();
+    void processWebFileStream();
     void processWebStreamTS();
     void processWebStreamHLS();
     void processBufferData();
@@ -419,7 +420,7 @@ private:
                  M4A_ILST = 7, M4A_MP4A = 8, M4A_AMRDY = 99, M4A_OKAY = 100};
     enum : int { CODEC_NONE = 0, CODEC_WAV = 1, CODEC_MP3 = 2, CODEC_AAC = 3, CODEC_M4A = 4, CODEC_FLAC = 5,
                  CODEC_AACP = 6, CODEC_OPUS = 7, CODEC_OGG = 8, CODEC_VORBIS = 9};
-    enum : int { ST_NONE = 0, ST_WEBFILE = 1, ST_WEBSTREAM = 2};
+    enum : int { ST_NONE = 0, ST_WEBFILE = 1, ST_WEBSTREAM = 2, ST_WEBFILESTREAM = 3};
     typedef enum { LEFTCHANNEL=0, RIGHTCHANNEL=1 } SampleIndex;
     typedef enum { LOWSHELF = 0, PEAKEQ = 1, HIFGSHELF =2 } FilterType;
 
@@ -534,6 +535,7 @@ private:
     bool            m_f_ts = true;                  // transport stream
     bool            m_f_m4aID3dataAreRead = false;  // has the m4a-ID3data already been read?
     bool            m_f_audiodataplay = false;
+    bool            m_f_user_stream = false;
     uint8_t         m_f_channelEnabled = 3;         // internal DAC, both channels
     uint32_t        m_audioFileDuration = 0;
     float           m_audioCurrentTime = 0;
