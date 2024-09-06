@@ -125,7 +125,7 @@ public:
     Audio(bool internalDAC = false, uint8_t channelEnabled = 3, uint8_t i2sPort = I2S_NUM_0); // #99
     ~Audio();
     void setBufsize(int rambuf_sz, int psrambuf_sz);
-    bool connecttohost(const char* host, const char* user = "", const char* pwd = "", const bool user_stream = false);
+    bool connecttohost(const char* host, const char* user = "", const char* pwd = "", const bool use_stream = false);
     String connecttopayload(const char* host);
     bool connecttodata(uint8_t * data, size_t data_size, const char * data_type);
     void stopClient(const char* host);
@@ -535,7 +535,7 @@ private:
     bool            m_f_ts = true;                  // transport stream
     bool            m_f_m4aID3dataAreRead = false;  // has the m4a-ID3data already been read?
     bool            m_f_audiodataplay = false;
-    bool            m_f_user_stream = false;
+    bool            m_f_use_stream = false;
     uint8_t         m_f_channelEnabled = 3;         // internal DAC, both channels
     uint32_t        m_audioFileDuration = 0;
     float           m_audioCurrentTime = 0;

@@ -353,7 +353,7 @@ void Audio::setDefaults() {
     m_f_ts = false;
     m_f_m4aID3dataAreRead = false;
     m_f_audiodataplay = false;
-    m_f_user_stream = false;
+    m_f_use_stream = false;
 
     m_streamType = ST_NONE;
     m_codec = CODEC_NONE;
@@ -386,7 +386,7 @@ void Audio::setConnectionTimeout(uint16_t timeout_ms, uint16_t timeout_ms_ssl){
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool Audio::connecttohost(const char* host, const char* user, const char* pwd, const bool user_stream) {
+bool Audio::connecttohost(const char* host, const char* user, const char* pwd, const bool use_stream) {
     // user and pwd for authentification only, can be empty
     xSemaphoreTakeRecursive(mutex_audio, portMAX_DELAY);
 
@@ -529,7 +529,7 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd, c
         if(endsWith(extension, ".m3u8")){m_expectedPlsFmt = FORMAT_M3U8; if(audio_lasthost) audio_lasthost(host);}
         setDatamode(HTTP_RESPONSE_HEADER);   // Handle header
         m_streamType = ST_WEBSTREAM;
-        m_f_user_stream = user_stream;
+        m_f_use_stream = use_stream;
     }
     else{
         AUDIO_INFO("Request %s failed!", l_host);
@@ -3138,8 +3138,8 @@ void Audio::processWebFileStream() {
     int16_t bytesAddedToBuffer = _client->read(InBuff.getWritePtr(), availableBytes);
 
     if(bytesAddedToBuffer > 0) {
-        Serial.print("stream get data time:");
-        Serial.println(millis());
+        // Serial.print("stream get data time:");
+        // Serial.println(millis());
         byteCounter  += bytesAddedToBuffer;  // Pull request #42
         if(m_f_chunked)             m_chunkcount   -= bytesAddedToBuffer;
         if(m_controlCounter == 100) audioDataCount += bytesAddedToBuffer;
@@ -3738,7 +3738,7 @@ bool Audio::parseHttpResponseHeader() { // this is the response to a GET / reque
             const char* c_cl = (rhl + 15);
             int32_t i_cl = atoi(c_cl);
             m_contentlength = i_cl;
-            if (m_f_user_stream) m_streamType = ST_WEBFILESTREAM;
+            if (m_f_use_stream) m_streamType = ST_WEBFILESTREAM;
             else m_streamType = ST_WEBFILE; // Stream comes from a fileserver
             if(m_f_Log) AUDIO_INFO("content-length: %i", m_contentlength);
         }
