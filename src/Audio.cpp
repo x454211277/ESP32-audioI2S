@@ -354,6 +354,9 @@ void Audio::setDefaults() {
     m_f_m4aID3dataAreRead = false;
     m_f_audiodataplay = false;
     m_f_use_stream = false;
+    m_f_use_request_list = false;
+    m_f_request_list_finish = false;
+    m_f_request_finish = true;
 
     m_streamType = ST_NONE;
     m_codec = CODEC_NONE;
@@ -378,7 +381,63 @@ void Audio::setDefaults() {
     m_memory_size = 0;
     m_ID3Size = 0;
 }
+//---------------------------------------------------------------------------------------------------------------------
+void Audio::setSomeDefaults() {
+    if(m_playlistBuff)   {free(m_playlistBuff);     m_playlistBuff = NULL;} // free if stream is not m3u8
+    vector_clear_and_shrink(m_playlistURL);
+    vector_clear_and_shrink(m_playlistContent);
+    m_hashQueue.clear(); m_hashQueue.shrink_to_fit(); // uint32_t vector
+    client.stop();
+    clientsecure.stop();
+    _client = static_cast<WiFiClient*>(&client); /* default to *something* so that no NULL deref can happen */
+    ts_parsePacket(0, 0, 0); // reset ts routine
 
+    AUDIO_INFO("buffers freed, free Heap: %u bytes", ESP.getFreeHeap());
+
+    m_f_chunked = false;                                    // Assume not chunked
+    m_f_firstmetabyte = false;
+    // m_f_playing = false;
+    m_f_ssl = false;
+    m_f_metadata = false;
+    m_f_tts = false;
+    m_f_firstCall = true;                                   // InitSequence for processWebstream and processLokalFile
+    m_f_loop = false;                                       // Set if audio file should loop
+    m_f_unsync = false;                                     // set within ID3 tag but not used
+    m_f_exthdr = false;                                     // ID3 extended header
+    m_f_rtsp = false;                                       // RTSP (m3u8)stream
+    m_f_m3u8data = false;                                   // set again in processM3U8entries() if necessary
+    m_f_continue = false;
+    m_f_ts = false;
+    m_f_m4aID3dataAreRead = false;
+    m_f_audiodataplay = false;
+    m_f_use_stream = false;
+    m_f_use_request_list = false;
+    m_f_request_list_finish = false;
+    m_f_request_finish = true;
+
+    m_streamType = ST_NONE;
+    m_codec = CODEC_NONE;
+    m_playlistFormat = FORMAT_NONE;
+    m_datamode = AUDIO_NONE;
+    m_audioCurrentTime = 0;                                 // Reset playtimer
+    m_audioFileDuration = 0;
+    m_audioDataStart = 0;
+    m_audioDataSize = 0;
+    m_avr_bitrate = 0;                                      // the same as m_bitrate if CBR, median if VBR
+    m_bitRate = 0;                                          // Bitrate still unknown
+    m_bytesNotDecoded = 0;                                  // counts all not decodable bytes
+    m_chunkcount = 0;                                       // for chunked streams
+    m_contentlength = 0;                                    // If Content-Length is known, count it
+    m_curSample = 0;
+    m_metaint = 0;                                          // No metaint yet
+    m_LFcount = 0;                                          // For end of header detection
+    m_controlCounter = 0;                                   // Status within readID3data() and readWaveHeader()
+    // m_channels = 2;                                         // assume stereo #209
+    m_streamTitleHash = 0;
+    m_file_size = 0;
+    m_memory_size = 0;
+    m_ID3Size = 0;
+}
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::setConnectionTimeout(uint16_t timeout_ms, uint16_t timeout_ms_ssl){
     if(timeout_ms)     m_timeout_ms     = timeout_ms;
@@ -386,7 +445,7 @@ void Audio::setConnectionTimeout(uint16_t timeout_ms, uint16_t timeout_ms_ssl){
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool Audio::connecttohost(const char* host, const char* user, const char* pwd, const bool use_stream) {
+bool Audio::connecttohost(const char* host, const char* user, const char* pwd, const bool use_stream, const bool use_list, const bool is_first, const bool is_last) {
     // user and pwd for authentification only, can be empty
     xSemaphoreTakeRecursive(mutex_audio, portMAX_DELAY);
 
@@ -448,7 +507,16 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd, c
     }
 
     AUDIO_INFO("Connect to new host: \"%s\"", l_host);
-    setDefaults(); // no need to stop clients if connection is established (default is true)
+    if (use_list)
+    {
+        if (is_first) setDefaults(); // no need to stop clients if connection is established (default is true)
+        else setSomeDefaults();
+    }
+    else
+    {
+        setDefaults(); // no need to stop clients if connection is established (default is true)
+    }
+
 
     if(startsWith(l_host, "https")) m_f_ssl = true;
     else                            m_f_ssl = false;
@@ -530,6 +598,9 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd, c
         setDatamode(HTTP_RESPONSE_HEADER);   // Handle header
         m_streamType = ST_WEBSTREAM;
         m_f_use_stream = use_stream;
+        m_f_use_request_list = use_list;
+        m_f_request_list_finish = is_last;
+        m_f_request_finish = false;
     }
     else{
         AUDIO_INFO("Request %s failed!", l_host);
@@ -2184,6 +2255,13 @@ bool Audio::pauseResume() {
     return retVal;
 }
 //---------------------------------------------------------------------------------------------------------------------
+void Audio::requestListFinish()
+{
+    m_f_request_list_finish = true;
+    m_f_running = false;
+    m_streamType = ST_NONE;
+}
+//---------------------------------------------------------------------------------------------------------------------
 bool Audio::playChunk() {
     // If we've got data, try and pump it out..
     int16_t sample[2];
@@ -3114,7 +3192,7 @@ void Audio::processWebFileStream() {
         audioDataCount = 0;
     }
 
-    if(!m_contentlength && !m_f_tts) {log_e("webfile without contentlength!"); stopSong(); return;} // guard
+    if(!m_contentlength && !m_f_tts) {log_e("webfile without contentlength! contentlength: %d", m_contentlength); stopSong(); return;} // guard
 
     uint32_t availableBytes = _client->available();      // available from stream
 
@@ -3134,6 +3212,11 @@ void Audio::processWebFileStream() {
     availableBytes = min((uint32_t)InBuff.writeSpace(), availableBytes);
     availableBytes = min(m_contentlength - byteCounter, availableBytes);
     if(m_audioDataSize) availableBytes = min(m_audioDataSize - (byteCounter - m_audioDataStart), availableBytes);
+    if(availableBytes > 0)
+    {
+        Serial.print("availableBytes:");
+        Serial.println(availableBytes);
+    }
 
     int16_t bytesAddedToBuffer = _client->read(InBuff.getWritePtr(), availableBytes);
 
@@ -3180,33 +3263,66 @@ void Audio::processWebFileStream() {
 
     // end of webfile reached? - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     if(f_webFileDataComplete && InBuff.bufferFilled() < InBuff.getMaxBlockSize()){
+        if (!m_f_request_finish)
+        {
+            Serial.print("stream play finish time:");
+            Serial.println(millis());
+            m_f_request_finish = true;
+        }
         if(InBuff.bufferFilled()){
             if(!readID3V1Tag()){
                 int bytesDecoded = sendBytes(InBuff.getReadPtr(), InBuff.bufferFilled());
                 if(bytesDecoded > 2){InBuff.bytesWasRead(bytesDecoded); return;}
             }
-        }
+        }        
+        if (m_f_use_request_list)
+        {
+            if (m_f_request_list_finish)
+            {
+                m_f_running = false;
+                m_streamType = ST_NONE;
+                if(m_codec == CODEC_MP3)    MP3Decoder_FreeBuffers();
+                if(m_codec == CODEC_AAC)    AACDecoder_FreeBuffers();
+                if(m_codec == CODEC_M4A)    AACDecoder_FreeBuffers();
+                if(m_codec == CODEC_FLAC)   FLACDecoder_FreeBuffers();
+                if(m_codec == CODEC_OPUS)   OPUSDecoder_FreeBuffers();
+                if(m_codec == CODEC_VORBIS) VORBISDecoder_FreeBuffers();
 
-        Serial.print("stream play finish time:");
-        Serial.println(millis());
-        m_f_running = false;
-        m_streamType = ST_NONE;
-        if(m_codec == CODEC_MP3)    MP3Decoder_FreeBuffers();
-        if(m_codec == CODEC_AAC)    AACDecoder_FreeBuffers();
-        if(m_codec == CODEC_M4A)    AACDecoder_FreeBuffers();
-        if(m_codec == CODEC_FLAC)   FLACDecoder_FreeBuffers();
-        if(m_codec == CODEC_OPUS)   OPUSDecoder_FreeBuffers();
-        if(m_codec == CODEC_VORBIS) VORBISDecoder_FreeBuffers();
+                if(m_f_tts){
+                    AUDIO_INFO("End of speech: \"%s\"", m_lastHost);
+                    if(audio_eof_speech) audio_eof_speech(m_lastHost);
+                }
+                else{
+                    AUDIO_INFO("End of webstream: \"%s\"", m_lastHost);
+                    if(audio_eof_stream) audio_eof_stream(m_lastHost);
+                }
+            }
+            return;
+        }
+        else
+        {
+            Serial.print("stream play finish time:");
+            Serial.println(millis());
+            
+            m_f_running = false;
+            m_streamType = ST_NONE;
+            if(m_codec == CODEC_MP3)    MP3Decoder_FreeBuffers();
+            if(m_codec == CODEC_AAC)    AACDecoder_FreeBuffers();
+            if(m_codec == CODEC_M4A)    AACDecoder_FreeBuffers();
+            if(m_codec == CODEC_FLAC)   FLACDecoder_FreeBuffers();
+            if(m_codec == CODEC_OPUS)   OPUSDecoder_FreeBuffers();
+            if(m_codec == CODEC_VORBIS) VORBISDecoder_FreeBuffers();
 
-        if(m_f_tts){
-            AUDIO_INFO("End of speech: \"%s\"", m_lastHost);
-            if(audio_eof_speech) audio_eof_speech(m_lastHost);
+            if(m_f_tts){
+                AUDIO_INFO("End of speech: \"%s\"", m_lastHost);
+                if(audio_eof_speech) audio_eof_speech(m_lastHost);
+            }
+            else{
+                AUDIO_INFO("End of webstream: \"%s\"", m_lastHost);
+                if(audio_eof_stream) audio_eof_stream(m_lastHost);
+            }
+            return;
         }
-        else{
-            AUDIO_INFO("End of webstream: \"%s\"", m_lastHost);
-            if(audio_eof_stream) audio_eof_stream(m_lastHost);
-        }
-        return;
     }
 
     if(byteCounter == m_contentlength)                    {f_webFileDataComplete = true;}
@@ -4809,6 +4925,7 @@ bool Audio::playSample(int16_t sample[2]) {
     }
     m_i2s_bytesWritten = 0;
     esp_err_t err = i2s_write((i2s_port_t) m_i2s_num, (const char*) &s32, sizeof(uint32_t), &m_i2s_bytesWritten, 100);
+
     if(err != ESP_OK) {
         log_e("ESP32 Errorcode %i", err);
         return false;
@@ -5831,4 +5948,3 @@ uint8_t Audio::determineOggCodec(uint8_t* data, uint16_t len){
     return CODEC_NONE;
 }
 //----------------------------------------------------------------------------------------------------------------------
-

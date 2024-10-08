@@ -125,7 +125,7 @@ public:
     Audio(bool internalDAC = false, uint8_t channelEnabled = 3, uint8_t i2sPort = I2S_NUM_0); // #99
     ~Audio();
     void setBufsize(int rambuf_sz, int psrambuf_sz);
-    bool connecttohost(const char* host, const char* user = "", const char* pwd = "", const bool use_stream = false);
+    bool connecttohost(const char* host, const char* user = "", const char* pwd = "", const bool use_stream = false, const bool use_list = false, const bool is_first = false, const bool is_last = false);
     String connecttopayload(const char* host);
     bool connecttodata(uint8_t * data, size_t data_size, const char * data_type);
     void stopClient(const char* host);
@@ -141,8 +141,10 @@ public:
     bool setPinout(uint8_t BCLK, uint8_t LRC, uint8_t DOUT, int8_t DIN = I2S_PIN_NO_CHANGE, int8_t MCK = I2S_PIN_NO_CHANGE);
     bool pauseResume();
     bool isRunning() {return m_f_running;}
+    bool isRquestfinish() {return m_f_request_finish;}
     void loop();
     uint32_t stopSong();
+    void requestListFinish();
     void forceMono(bool m);
     void setBalance(int8_t bal = 0);
     void setVolumeSteps(uint8_t steps);
@@ -183,6 +185,7 @@ private:
     void UTF8toASCII(char* str);
     bool latinToUTF8(char* buff, size_t bufflen);
     void setDefaults(); // free buffers and set defaults
+    void setSomeDefaults(); // free buffers and set defaults
     void initInBuff();
     bool httpPrint(const char* host);
     void processLocalFile();
@@ -536,6 +539,10 @@ private:
     bool            m_f_m4aID3dataAreRead = false;  // has the m4a-ID3data already been read?
     bool            m_f_audiodataplay = false;
     bool            m_f_use_stream = false;
+    bool            m_f_use_request_list = false;
+    bool            m_f_request_list_finish = false;
+    bool            m_f_request_finish = true;
+    bool            m_f_sample_play = false;
     uint8_t         m_f_channelEnabled = 3;         // internal DAC, both channels
     uint32_t        m_audioFileDuration = 0;
     float           m_audioCurrentTime = 0;
